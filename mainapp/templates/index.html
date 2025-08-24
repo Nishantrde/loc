@@ -3,127 +3,198 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Mobile Geolocation Debug</title>
+  <title>Mobile Geolocation → Address (Full)</title>
   <style>
-    body{font-family:system-ui,Arial;padding:18px;line-height:1.4}
-    pre{background:#f6f6f6;padding:10px;border-radius:6px;white-space:pre-wrap}
-    button{padding:8px 12px;font-size:16px}
-    .err{color:#a00}
-    .ok{color:#080}
+    body{font-family:system-ui,Arial,Helvetica,sans-serif;padding:18px;max-width:820px;margin:auto}
+    h1{font-size:1.1rem}
+    button{padding:10px 14px;margin:6px 6px 6px 0;border-radius:8px;border:1px solid #ccc;background:#fff}
+    .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+    .log{background:#f6f7fa;padding:10px;border-radius:8px;white-space:pre-wrap;font-family:monospace}
+    .ok{color:green} .err{color:#b00020}
+    label{font-size:0.9rem;margin-right:6px}
+    select,input[type=text]{padding:8px;border-radius:6px;border:1px solid #ddd}
+    footer{margin-top:14px;font-size:0.85rem;color:#555}
   </style>
 </head>
 <body>
-  <h3>Get mobile GPS (debug-friendly)</h3>
-  <p>Tap the button and watch the log below. If it times out, follow the checks above.</p>
-  <button id="go">Get location</button>
-  <button id="clear">Clear</button>
-  <div id="log"></div>
-  <pre id="out"></pre>
+  <h1>Get GPS coords & convert → Address</h1>
 
-  <script>
-  const go = document.getElementById('go');
-  const out = document.getElementById('out');
-  const log = document.getElementById('log');
-  const clearBtn = document.getElementById('clear');
+  <div class="row">
+    <button id="btnGet">Get location</button>
+    <button id="btnClear">Clear</button>
+    <label for="provider">Reverse geocode:</label>
+    <select id="provider">
+      <option value="nominatim">OpenStreetMap (Nominatim) — no key</option>
+      <option value="google">Google Geocoding via server proxy (recommended for production)</option>
+    </select>
+  </div>
 
-  function logMsg(msg, cls) {
-    const p = document.createElement('div');
-    if (cls) p.className = cls;
-    p.textContent = msg;
-    log.appendChild(p);
-    console.log(msg);
-  }
-  function show(obj){ out.textContent = JSON.stringify(obj, null, 2); }
+  <div class="row">
+    <label for="proxyUrl">Google proxy URL (if using Google):</label>
+    <input id="proxyUrl" type="text" value="http://localhost:3000/reverse" style="flex:1"/>
+  </div>
 
-  // Helper to call getCurrentPosition as a Promise
-  function getPos(options) {
-    return new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, options);
-    });
-  }
+  <div>
+    <strong>Logs:</strong>
+    <div id="log" class="log">Ready. Tap "Get location".</div>
+  </div>
 
-  // Sequence: try fast network lookup (low accuracy short timeout),
-  // then try GPS (high accuracy longer timeout),
-  // then watchPosition fallback for up to 45s.
-  async function getLocationSequence() {
-    if (!navigator.geolocation) {
-      logMsg('Geolocation NOT supported by this browser', 'err');
-      return;
-    }
+  <div style="margin-top:10px">
+    <strong>Result (coords & address):</strong>
+    <pre id="out" class="log" style="min-height:120px"></pre>
+  </div>
 
-    logMsg('→ Attempt 1: Quick network-based location (fast)', 'ok');
-    try {
-      const pos = await getPos({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
-      const { latitude, longitude, accuracy } = pos.coords;
-      logMsg(`Got (network) coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
-      show({ method: 'network', coords: pos.coords, timestamp: pos.timestamp });
-      return;
-    } catch (e) {
-      logMsg(`Attempt 1 failed: ${e.message} (code ${e.code || 'N/A'})`, 'err');
-    }
+  <footer>
+    Notes: Use HTTPS or open via http://localhost for testing. If using Google provider, run the server proxy (server.js) with your API key.
+  </footer>
 
-    logMsg('→ Attempt 2: GPS/high accuracy (may take longer)', 'ok');
-    try {
-      const pos2 = await getPos({ enableHighAccuracy: true, timeout: 30000, maximumAge: 0 });
-      const { latitude, longitude, accuracy } = pos2.coords;
-      logMsg(`Got (GPS) coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
-      show({ method: 'gps', coords: pos2.coords, timestamp: pos2.timestamp });
-      return;
-    } catch (e) {
-      logMsg(`Attempt 2 failed: ${e.message} (code ${e.code || 'N/A'})`, 'err');
-    }
+<script>
+const btnGet = document.getElementById('btnGet');
+const btnClear = document.getElementById('btnClear');
+const logEl = document.getElementById('log');
+const out = document.getElementById('out');
+const providerSelect = document.getElementById('provider');
+const proxyUrlInput = document.getElementById('proxyUrl');
 
-    logMsg('→ Attempt 3: watchPosition fallback (waiting up to 45s)', 'ok');
-    await new Promise((resolve) => {
-      const start = Date.now();
-      const maxWait = 45000; // 45s
-      const id = navigator.geolocation.watchPosition(pos => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        logMsg(`watchPosition got coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
-        show({ method: 'watch', coords: pos.coords, timestamp: pos.timestamp });
-        navigator.geolocation.clearWatch(id);
-        resolve();
-      }, err => {
-        logMsg(`watchPosition error: ${err.message} (code ${err.code})`, 'err');
-        // If permission denied or unavailable, stop immediately
-        if (err.code === 1 || err.code === 2) {
-          navigator.geolocation.clearWatch(id);
-          resolve();
-        }
-        // otherwise keep waiting until timeout below
-      }, { enableHighAccuracy: true, maximumAge: 0 });
+function log(msg, cls) {
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
+  if (cls === 'err') logEl.style.color = '#b00020';
+  else if (cls === 'ok') logEl.style.color = 'green';
+}
 
-      // stop after maxWait
-      setTimeout(() => {
-        try { navigator.geolocation.clearWatch(id); } catch(_) {}
-        logMsg('watchPosition timed out after 45s', 'err');
-        resolve();
-      }, maxWait);
-    });
-
-    logMsg('All attempts finished — if still failing, follow mobile checks (GPS, permissions, HTTPS, battery saver).', 'err');
-  }
-
-  go.addEventListener('click', () => {
-    log.innerHTML = '';
-    out.textContent = '';
-    getLocationSequence();
+// Promise wrapper for getCurrentPosition
+function getPos(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
-  clearBtn.addEventListener('click', () => { log.innerHTML = ''; out.textContent = ''; });
+}
 
-  // Optional: map quick test using IP geolocation as last resort (coarse)
-  // NOTE: this is a fallback and gives only approximate location (IP-based).
-  async function ipFallback() {
-    try {
-      const r = await fetch('https://ipapi.co/json/'); // short, public IP->geo (may be blocked on some CSPs)
-      if (!r.ok) throw new Error('ip fallback failed');
-      const j = await r.json();
-      logMsg(`IP fallback: ${j.latitude}, ${j.longitude} (approx)`);
-      show({ method: 'ip', ipInfo: j });
-    } catch (e) {
-      logMsg('IP fallback unavailable: ' + e.message);
-    }
+async function reverseGeocodeNominatim(lat, lon) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+  log('Calling Nominatim reverse geocode...', 'ok');
+  const res = await fetch(url, { headers: { Accept: 'application/json' }});
+  if (!res.ok) throw new Error('Nominatim error ' + res.status);
+  return res.json();
+}
+
+async function reverseGeocodeProxy(lat, lon, proxyUrl) {
+  // proxy is expected to return the same JSON as Google Geocoding API
+  const url = `${proxyUrl}?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+  log('Calling proxy ' + url, 'ok');
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Proxy error ' + res.status);
+  return res.json();
+}
+
+function extractGoogleFormatted(results) {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  return {
+    formatted: results[0].formatted_address,
+    raw: results
+  };
+}
+
+function normalizeNominatim(data) {
+  return {
+    formatted: data.display_name || null,
+    components: data.address || null,
+    raw: data
+  };
+}
+
+async function getLocationSequenceAndReverse() {
+  out.textContent = '';
+  logEl.textContent = '';
+  if (!navigator.geolocation) {
+    log('Geolocation not supported', 'err');
+    return;
   }
-  </script>
+
+  // Attempt 1: quick network (low accuracy)
+  log('Attempt 1: Quick network-based location (10s timeout)', 'ok');
+  try {
+    const pos = await getPos({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+    const { latitude, longitude, accuracy } = pos.coords;
+    log(`Got network coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
+    await handleReverse(latitude, longitude, pos.coords);
+    return;
+  } catch (e) {
+    log(`Attempt 1 failed: ${e.message}`, 'err');
+  }
+
+  // Attempt 2: GPS (high accuracy)
+  log('Attempt 2: GPS/high accuracy (30s timeout)', 'ok');
+  try {
+    const pos = await getPos({ enableHighAccuracy: true, timeout: 30000, maximumAge: 0 });
+    const { latitude, longitude, accuracy } = pos.coords;
+    log(`Got GPS coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
+    await handleReverse(latitude, longitude, pos.coords);
+    return;
+  } catch (e) {
+    log(`Attempt 2 failed: ${e.message}`, 'err');
+  }
+
+  // Attempt 3: watchPosition fallback up to 45s
+  log('Attempt 3: watchPosition fallback (waiting up to 45s)', 'ok');
+  await new Promise((resolve) => {
+    const maxWait = 45000;
+    const id = navigator.geolocation.watchPosition(async pos => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      log(`watchPosition coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)}m)`, 'ok');
+      navigator.geolocation.clearWatch(id);
+      handleReverse(latitude, longitude, pos.coords).then(resolve).catch(resolve);
+    }, err => {
+      log(`watchPosition error: ${err.message}`, 'err');
+      if (err.code === 1 || err.code === 2) { navigator.geolocation.clearWatch(id); resolve(); }
+    }, { enableHighAccuracy: true, maximumAge: 0 });
+
+    setTimeout(() => {
+      try { navigator.geolocation.clearWatch(id); } catch(_) {}
+      log('watchPosition timed out after 45s', 'err');
+      resolve();
+    }, maxWait);
+  });
+
+  log('All attempts finished.', 'err');
+}
+
+async function handleReverse(lat, lon, coordsObject) {
+  out.textContent = JSON.stringify({ coords: coordsObject }, null, 2);
+
+  const provider = providerSelect.value;
+  try {
+    if (provider === 'nominatim') {
+      const nom = await reverseGeocodeNominatim(lat, lon);
+      const normalized = normalizeNominatim(nom);
+      out.textContent = JSON.stringify({ coords: coordsObject, address: normalized }, null, 2);
+      log('Address (Nominatim) retrieved', 'ok');
+    } else if (provider === 'google') {
+      // call server proxy
+      const proxyUrl = proxyUrlInput.value.trim();
+      if (!proxyUrl) throw new Error('Proxy URL not set');
+      const res = await reverseGeocodeProxy(lat, lon, proxyUrl);
+      // expecting Google-like response: { results: [...], status: "OK" }
+      const normalized = extractGoogleFormatted(res.results || res);
+      out.textContent = JSON.stringify({ coords: coordsObject, address: normalized || res }, null, 2);
+      log('Address (Google via proxy) retrieved', 'ok');
+    }
+  } catch (e) {
+    log('Reverse geocoding failed: ' + e.message, 'err');
+    out.textContent = JSON.stringify({ coords: coordsObject, reverseError: e.message }, null, 2);
+  }
+}
+
+btnGet.addEventListener('click', () => {
+  logEl.textContent = '';
+  out.textContent = '';
+  getLocationSequenceAndReverse().catch(err => log('Unexpected error: ' + err.message, 'err'));
+});
+
+btnClear.addEventListener('click', () => {
+  logEl.textContent = 'Cleared.';
+  out.textContent = '';
+});
+</script>
 </body>
 </html>
