@@ -2,77 +2,52 @@
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Get GPS coords + address</title>
-  <style>
-    body { font-family: system-ui, Arial; padding: 20px; }
-    pre { background:#f4f4f4; padding:10px; border-radius:6px; }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Mobile: get GPS coords</title>
 </head>
 <body>
-  <h2>Get GPS coordinates & address</h2>
-  <button id="btn">Get my location</button>
-  <div id="status"></div>
-  <pre id="output"></pre>
+  <h3>Tap button to get your location (mobile)</h3>
+  <button id="btn">Get location</button>
+  <div id="info"></div>
 
   <script>
     const btn = document.getElementById('btn');
-    const status = document.getElementById('status');
-    const output = document.getElementById('output');
+    const info = document.getElementById('info');
 
-    function show(msg){ status.textContent = msg; }
-    function showResult(obj){ output.textContent = JSON.stringify(obj, null, 2); }
-
-    // Use navigator.geolocation to get coordinates
-    async function getLocationAndAddress() {
+    async function getCoordsAndAddress() {
       if (!navigator.geolocation) {
-        show('Geolocation not supported by this browser.');
+        info.textContent = 'Geolocation not supported';
         return;
       }
+      info.textContent = 'Requesting permission...';
 
-      show('Requesting location permission...');
-      // wrap in a Promise to use async/await
-      const pos = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true, // ask for best location (may use more battery)
-          timeout: 15000,
-          maximumAge: 0
-        });
-      }).catch(err => { throw err; });
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        info.innerHTML = `
+          <b>Coords:</b> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br/>
+          <b>Accuracy:</b> ±${Math.round(accuracy)} m<br/>
+          Reverse geocoding...
+        `;
 
-      const { latitude, longitude } = pos.coords;
-      show(`Got coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} — reverse geocoding...`);
-      showResult({ latitude, longitude, accuracy_meters: pos.coords.accuracy });
-
-      // Reverse geocode with OpenStreetMap Nominatim (client-side)
-      // NOTE: Nominatim public server is rate-limited and not for heavy production use.
-      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`;
-
-      const response = await fetch(nominatimUrl, {
-        headers: {
-          // Can't set User-Agent in browsers; the browser will send one automatically.
-          // Keep requests respectful and low-frequency.
-          'Accept': 'application/json'
+        // Reverse geocode with OpenStreetMap Nominatim (light use only)
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`;
+        try {
+          const res = await fetch(url, { headers: { Accept: 'application/json' }});
+          const j = await res.json();
+          info.innerHTML += `<br/><b>Address:</b> ${j.display_name || 'Not found'}`;
+        } catch (e) {
+          info.innerHTML += `<br/>Reverse geocode failed: ${e.message}`;
         }
+      }, err => {
+        info.textContent = 'Error: ' + (err.message || err.code);
+      }, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
       });
-
-      if (!response.ok) throw new Error('Reverse geocoding failed: ' + response.status);
-
-      const data = await response.json();
-      // data.display_name contains a human readable address
-      show(`Address: ${data.display_name || 'Not available'}`);
-      showResult({ coords: { latitude, longitude }, address: data.display_name, raw: data });
     }
 
-    btn.addEventListener('click', async () => {
-      try {
-        await getLocationAndAddress();
-      } catch (err) {
-        console.error(err);
-        if (err.code === 1) show('Permission denied. Allow location access in your browser.');
-        else if (err.code === 3) show('Timed out while getting location.');
-        else show(err.message || String(err));
-      }
-    });
+    btn.addEventListener('click', getCoordsAndAddress);
   </script>
 </body>
 </html>
