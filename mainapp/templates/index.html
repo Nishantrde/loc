@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Get GPS coords + address</title>
+  <style>
+    body { font-family: system-ui, Arial; padding: 20px; }
+    pre { background:#f4f4f4; padding:10px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h2>Get GPS coordinates & address</h2>
+  <button id="btn">Get my location</button>
+  <div id="status"></div>
+  <pre id="output"></pre>
+
+  <script>
+    const btn = document.getElementById('btn');
+    const status = document.getElementById('status');
+    const output = document.getElementById('output');
+
+    function show(msg){ status.textContent = msg; }
+    function showResult(obj){ output.textContent = JSON.stringify(obj, null, 2); }
+
+    // Use navigator.geolocation to get coordinates
+    async function getLocationAndAddress() {
+      if (!navigator.geolocation) {
+        show('Geolocation not supported by this browser.');
+        return;
+      }
+
+      show('Requesting location permission...');
+      // wrap in a Promise to use async/await
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true, // ask for best location (may use more battery)
+          timeout: 15000,
+          maximumAge: 0
+        });
+      }).catch(err => { throw err; });
+
+      const { latitude, longitude } = pos.coords;
+      show(`Got coords: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} — reverse geocoding...`);
+      showResult({ latitude, longitude, accuracy_meters: pos.coords.accuracy });
+
+      // Reverse geocode with OpenStreetMap Nominatim (client-side)
+      // NOTE: Nominatim public server is rate-limited and not for heavy production use.
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`;
+
+      const response = await fetch(nominatimUrl, {
+        headers: {
+          // Can't set User-Agent in browsers; the browser will send one automatically.
+          // Keep requests respectful and low-frequency.
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) throw new Error('Reverse geocoding failed: ' + response.status);
+
+      const data = await response.json();
+      // data.display_name contains a human readable address
+      show(`Address: ${data.display_name || 'Not available'}`);
+      showResult({ coords: { latitude, longitude }, address: data.display_name, raw: data });
+    }
+
+    btn.addEventListener('click', async () => {
+      try {
+        await getLocationAndAddress();
+      } catch (err) {
+        console.error(err);
+        if (err.code === 1) show('Permission denied. Allow location access in your browser.');
+        else if (err.code === 3) show('Timed out while getting location.');
+        else show(err.message || String(err));
+      }
+    });
+  </script>
+</body>
+</html>
